@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from enum import Enum
 from typing import Generic, Protocol, TypeVar, cast, runtime_checkable
 
 from apteno.errors import ToolFailure
@@ -18,11 +19,20 @@ RequestT = TypeVar("RequestT")
 ResponseT = TypeVar("ResponseT")
 
 
+class ToolRisk(Enum):
+    READ_ONLY = "read_only"
+    WRITE = "write"
+    APPROVAL_REQUIRED = "approval_required"
+
+
 @runtime_checkable
 class ToolSpec(Protocol):
+    """SDK-facing schema, codec, and executor for one model-callable tool."""
+
     name: str
     description: str
     parameters: Mapping[str, object]
+    risk: ToolRisk
 
     def encode_request(self, request: object) -> Mapping[str, object] | None: ...
 
@@ -33,7 +43,6 @@ class ToolSpec(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ToolDefinition(Generic[RequestT, ResponseT]):
-    """Concrete SDK-style tool definition, independent of any model provider."""
 
     name: str
     description: str
@@ -42,6 +51,7 @@ class ToolDefinition(Generic[RequestT, ResponseT]):
     encode: Callable[[RequestT], Mapping[str, object]]
     decode: Callable[[Mapping[str, object]], RequestT]
     handler: Callable[[RequestT], Ok[ResponseT] | Err[ToolFailure]]
+    risk: ToolRisk = ToolRisk.APPROVAL_REQUIRED
 
     def encode_request(self, request: object) -> Mapping[str, object] | None:
         if not isinstance(request, self.request_type):
@@ -102,11 +112,3 @@ def compose(
         return second.run(intermediate.value)
 
     return FunctionalTool(run)
-
-
-@runtime_checkable
-class ToolAdapters(Protocol):
-    @property
-    def tools(self) -> tuple[ToolSpec, ...]: ...
-
-    def dispatch(self, request: object) -> Ok[object] | Err[ToolFailure]: ...
